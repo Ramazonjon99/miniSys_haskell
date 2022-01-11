@@ -4,7 +4,11 @@ import Text.ParserCombinators.Parsec
 import Numeric
 
 number::Parser Int
-number = try decimalConst <|> try hexadecimalConst <|> octalConst
+number = do
+  x <- try decimalConst <|> try hexadecimalConst <|> octalConst
+  if 0 <= x && x <= 2147483647
+  then return x
+  else error "number literal should be 0 <= x <= 2147483647"
 
 decimalConst::Parser Int
 decimalConst = do

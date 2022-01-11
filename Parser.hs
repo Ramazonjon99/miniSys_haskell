@@ -34,17 +34,63 @@ ident = do
 block :: Parser Block
 block = do
   lexemeA $ char '{'
-  lexemeA1 $ string "return"
-  ret <- lexemeA number
+  string "return"
+  lookAhead (void $ char '(') <|> void (many1 whitespace)
+  ret <- lexemeA expr
   lexemeA $ char ';'
   lexemeA $ char '}'
-  if 0 <= ret && ret <= 2147483647 then
-    return $ Block (Return ret)
-  else
-    fail $ "return value "++show ret++" not in [0, 2147483647]!"
+  return $ Block (Return ret)
 
-eol = do
-  try (string "\r\n") <|> try (string "\n\r") <|> string "\n" <|> string "\r"
+expr :: Parser Exp
+expr = do
+  a <- addExp
+  return $ Exp a
+
+addExp :: Parser AddExp
+addExp = try (do
+  m <- lexemeA mulExp
+  c <- lexemeA (char '+' <|> char '-')
+  a <- addExp
+  if c == '+'
+  then return $ AddExp2 m Pos a
+  else return $ AddExp2 m Neg a)
+  <|> (do
+  m <- mulExp
+  return $ AddExp1 m)
+
+mulExp :: Parser MulExp
+mulExp = try (do
+  u <- lexemeA unaryExp
+  c <- lexemeA (char '*' <|> char '/' <|> char '%')
+  m <- mulExp
+  let op = case c of '*' -> Mul
+                     '/' -> Div
+                     '%' -> Mod
+   in return $ MulExp2 u op m)
+  <|> (do
+  u <- unaryExp
+  return $ MulExp1 u)
+
+unaryExp :: Parser UnaryExp
+unaryExp = try (do
+  c <- lexemeA (char '+' <|> char '-')
+  u <- unaryExp
+  let op = case c of '+' -> Pos
+                     '-' -> Neg
+   in return $ UnaryExp2 op u)
+  <|> (do
+  p <- primaryExp
+  return $ UnaryExp1 p)
+
+primaryExp :: Parser PrimaryExp
+primaryExp = try (do
+  lexemeA $ char '('
+  e <- lexemeA expr
+  char ')'
+  return $ PrimaryExp1 e)
+  <|> do
+  n <- number
+  return $ PrimaryExp2 n
 
 lexemeA :: Parser a -> Parser a
 lexemeA p = p <* many whitespace
@@ -58,3 +104,7 @@ whitespace = void space <|> blockComment <|> lineComment
                    *> manyTill anyChar (try $ string "*/")
     lineComment = void $ try (string "//")
                   *> manyTill anyChar (void eol <|> eof)
+
+eol = do
+  try (string "\r\n") <|> try (string "\n\r") <|> string "\n" <|> string "\r"
+
