@@ -47,50 +47,58 @@ expr = do
   return $ Exp a
 
 addExp :: Parser AddExp
-addExp = try (do
-  m <- lexemeA mulExp
-  c <- lexemeA (char '+' <|> char '-')
-  a <- addExp
-  if c == '+'
-  then return $ AddExp2 m Pos a
-  else return $ AddExp2 m Neg a)
-  <|> (do
-  m <- mulExp
-  return $ AddExp1 m)
+addExp = try
+  (do
+    m <- lexemeA mulExp
+    c <- lexemeA (char '+' <|> char '-')
+    a <- addExp
+    if c == '+'
+    then return $ AddExp2 m Pos a
+    else return $ AddExp2 m Neg a)
+  <|>
+  (do
+    m <- mulExp
+    return $ AddExp1 m)
 
 mulExp :: Parser MulExp
-mulExp = try (do
-  u <- lexemeA unaryExp
-  c <- lexemeA (char '*' <|> char '/' <|> char '%')
-  m <- mulExp
-  let op = case c of '*' -> Mul
-                     '/' -> Div
-                     '%' -> Mod
-   in return $ MulExp2 u op m)
-  <|> (do
-  u <- unaryExp
-  return $ MulExp1 u)
+mulExp = try
+  (do
+    u <- lexemeA unaryExp
+    c <- lexemeA (char '*' <|> char '/' <|> char '%')
+    m <- mulExp
+    let op = case c of '*' -> Mul
+                       '/' -> Div
+                       '%' -> Mod
+     in return $ MulExp2 u op m)
+  <|>
+  (do
+    u <- unaryExp
+    return $ MulExp1 u)
 
 unaryExp :: Parser UnaryExp
-unaryExp = try (do
-  c <- lexemeA (char '+' <|> char '-')
-  u <- unaryExp
-  let op = case c of '+' -> Pos
-                     '-' -> Neg
-   in return $ UnaryExp2 op u)
-  <|> (do
-  p <- primaryExp
-  return $ UnaryExp1 p)
+unaryExp = try
+  (do
+    c <- lexemeA (char '+' <|> char '-')
+    u <- unaryExp
+    let op = case c of '+' -> Pos
+                       '-' -> Neg
+     in return $ UnaryExp2 op u)
+  <|>
+  (do
+    p <- primaryExp
+    return $ UnaryExp1 p)
 
 primaryExp :: Parser PrimaryExp
-primaryExp = try (do
-  lexemeA $ char '('
-  e <- lexemeA expr
-  char ')'
-  return $ PrimaryExp1 e)
-  <|> do
-  n <- number
-  return $ PrimaryExp2 n
+primaryExp = try
+  (do
+    lexemeA $ char '('
+    e <- lexemeA expr
+    char ')'
+    return $ PrimaryExp1 e)
+  <|>
+  (do
+    n <- number
+    return $ PrimaryExp2 n)
 
 lexemeA :: Parser a -> Parser a
 lexemeA p = p <* many whitespace
