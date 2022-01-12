@@ -1,3 +1,5 @@
+-- Notice:
+-- 1. Sequence matters
 module Parser where
 
 import Text.ParserCombinators.Parsec
@@ -8,14 +10,14 @@ import Syntax
 
 compUnit :: Parser CompUnit
 compUnit = do
-  whitespace
+  many whitespace
   f <- lexemeA funcDef
   return $ CompUnit f
 
 funcDef :: Parser FuncDef
 funcDef = do
-  ft <- funcType
-  id <- ident
+  ft <- lexemeA1 funcType
+  id <- lexemeA ident
   lexemeA $ char '('
   lexemeA $ char ')'
   b <- block
@@ -23,28 +25,91 @@ funcDef = do
 
 funcType :: Parser FuncType
 funcType = do
-  _ <- lexemeA1 $ string "int"
-  return TypeInt
-
-ident :: Parser Ident
-ident = do
-  _ <- lexemeA $ string "main"
-  return Main
+  _ <- string "int"
+  return FInt
 
 block :: Parser Block
 block = do
   lexemeA $ char '{'
-  string "return"
-  lookAhead (void $ char '(') <|> void (many1 whitespace)
-  ret <- lexemeA expr
-  lexemeA $ char ';'
-  lexemeA $ char '}'
-  return $ Block (Return ret)
+  items <- many (lexemeA blockItem)
+  char '}'
+  return $ Block items
+
+blockItem :: Parser BlockItem
+blockItem = try
+  (do
+    d <- decl
+    return $ BlockItem1 d)
+  <|>
+  (do
+    s <- stmt
+    return $ BlockItem2 s)
+
+decl :: Parser Decl
+decl = try
+  (do
+    lexemeA1 $ string "const"
+    t <- lexemeA1 btype
+    ds <- sepBy1 (lexemeA constDef) (lexemeA $ char ',')
+    char ';'
+    return $ ConstDecl t ds)
+  <|>
+  (do
+    t <- lexemeA1 btype
+    ds <- sepBy1 (lexemeA varDef) (lexemeA $ char ',')
+    char ';'
+    return $ VarDecl t ds)
+
+btype :: Parser BType
+btype = do
+  string "int"
+  return BInt
+
+constDef :: Parser ConstDef
+constDef = do
+  id <- lexemeA ident
+  lexemeA $ char '='
+  a <- addExp
+  return $ ConstDef id a
+
+varDef :: Parser VarDef
+varDef = try
+  (do
+    id <- lexemeA ident
+    lexemeA $ char '='
+    e <- expr
+    return $ VarDef2 id e)
+  <|>
+  (do
+    id <- ident
+    return $ VarDef1 id)
+
+stmt :: Parser Stmt
+stmt = try
+  (do
+    lval <- lexemeA ident
+    lexemeA $ char '='
+    e <- lexemeA expr
+    char ';'
+    return $ Stmt1 (LVal lval) e)
+  <|> try
+  (do
+    e <- lexemeA expr
+    char ';'
+    return $ Stmt2 e)
+  <|> try
+  (do
+    char ';'
+    return $ SemiColon)
+  <|>
+  (do
+    lexemeA $ string "return"
+    e <- lexemeA expr
+    char ';'
+    return $ Return e)
 
 expr :: Parser Exp
-expr = do
-  a <- addExp
-  return $ Exp a
+expr = addExp
 
 addExp :: Parser AddExp
 addExp = try
@@ -78,6 +143,13 @@ mulExp = try
 unaryExp :: Parser UnaryExp
 unaryExp = try
   (do
+    id <- lexemeA ident
+    lexemeA $ char '('
+    es <- sepBy (lexemeA expr) (lexemeA $ char ',')
+    char ')'
+    return $ UnaryExp3 id es)
+  <|> try
+  (do
     c <- lexemeA (char '+' <|> char '-')
     u <- unaryExp
     let op = case c of '+' -> Pos
@@ -95,10 +167,14 @@ primaryExp = try
     e <- lexemeA expr
     char ')'
     return $ PrimaryExp1 e)
-  <|>
+  <|> try
   (do
     n <- number
     return $ PrimaryExp2 n)
+  <|>
+  (do
+    lval <- ident
+    return $ PrimaryExp3 (LVal lval))
 
 lexemeA :: Parser a -> Parser a
 lexemeA p = p <* many whitespace
