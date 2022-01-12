@@ -1,0 +1,7 @@
+[jobs.ramazon_lex]
+
+image = { source = "dockerfile", path = ".", tag = "ramazon_lex" }
+
+run = [
+  "./program $input $ir"
+]
