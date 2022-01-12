@@ -7,7 +7,8 @@ type SymbolTable = [String]
 emit :: CompUnit -> Either String String
 emit (CompUnit (FuncDef TypeInt Main (Block (Return expr)))) = do
   codeExp <- codegenExp [] expr 
-  return $ "define dso_local i32 @main() {\n" ++ snd codeExp ++ "}"
+  return $ "define dso_local i32 @main() {\n" ++ snd codeExp
+    ++ "    ret i32 " ++ head (fst codeExp) ++ "\n}"
 
 newSym sym = "%" ++ show ((read (tail sym)::Int) + 1)
 
