@@ -8,38 +8,43 @@ import qualified Data.Map as Map
 
 emit :: CompUnit -> String
 emit (CompUnit f) =
-  show f
-  --let ret = runState (runCodegen (funcDef f))
-  --                   (CodegenState { symTab = []
-  --                                 , constTab = Map.empty
-  --                                 , curBlkName = 0
-  --                                 , blkTab = Map.empty
-  --                                 , calledFuncs = Map.empty})
-  -- in Map.foldr (++) "" (calledFuncs $ snd $ ret) ++ fst ret
+  let ret = runState (runCodegen (funcDef f))
+                     (CodegenState { symTab = []
+                                   , constTab = Map.empty
+                                   , curBlkName = 0
+                                   , blkTab = Map.empty
+                                   , calledFuncs = Map.empty})
+   in Map.foldr (++) "" (calledFuncs $ snd $ ret) ++ fst ret -- ++ (show . snd)  ret
 
 class OpCode a where
-  opCode :: a -> String
+  opInstr :: a -> String
   evalConstOp :: a -> Int -> Int -> Int
 instance OpCode AddOp where
-  opCode Add = "add"
-  opCode Sub = "sub"
+  opInstr Add = "add"
+  opInstr Sub = "sub"
   evalConstOp Add a b = (a + b)
   evalConstOp Sub a b = (a - b)
 instance OpCode MulOp where
-  opCode Mul = "mul"
-  opCode Div = "sdiv"
-  opCode Mod = "srem"
+  opInstr Mul = "mul"
+  opInstr Div = "sdiv"
+  opInstr Mod = "srem"
   evalConstOp Mul a b = (a * b)
   evalConstOp Div a b = (a `div` b)
   evalConstOp Mod a b = (a `rem` b)
 instance OpCode UnaryOp where
-  opCode LNot = "TODO"
-  opCode Pos = "add"
-  opCode Neg = "sub"
+  opInstr Pos = "add"
+  opInstr Neg = "sub"
   evalConstOp Pos 0 b = b
   evalConstOp Neg 0 b = -b
   evalConstOp LNot 0 b = error "evalConstExp LNot not implemented because bool type is not supported"
   evalConstOp _ _ _ = error "UnaryOp should be called with the first argument 0"
+
+cmpInstr "==" = "eq"
+cmpInstr "!=" = "ne"
+cmpInstr "<=" = "sle"
+cmpInstr ">=" = "sge"
+cmpInstr "<" = "slt"
+cmpInstr ">" = "sgt"
 
 tripleCode :: String -> String -> String -> String -> String
 tripleCode op dest src1 src2  = "    " ++ dest ++ " = " ++ op ++ " i32 "
@@ -77,6 +82,8 @@ lastSym symtab = snd (head symtab)
 
 newSym [] = "%1"
 newSym symtab = "%" ++ show (read (tail $ snd $ head symtab) + 1)
+
+newSym' sym = "%" ++ show (read (tail sym) + 1)
 
 appendSym :: VarName -> Symbol -> SymbolTable -> SymbolTable
 appendSym var sym sym_tab = (var, sym):sym_tab
@@ -145,7 +152,7 @@ decl (VarDecl BInt ((VarDef1 id):vds)) = do
   case lookup id sym_tab of Nothing -> return ""
                             Just _ -> error $ "variable "++id++" already exists"
   let new_sym = newSym sym_tab
-  modify (\st -> st {symTab = appendSym id new_sym sym_tab})
+  modify (\st -> st {symTab = appendSym  id new_sym sym_tab})
   remaining_codes <- decl (VarDecl BInt vds)
   return $ "    "++new_sym++" = alloca i32\n"++remaining_codes
 
@@ -163,6 +170,7 @@ decl (VarDecl BInt ((VarDef2 id e):vds)) = do
   return $ decl_codes++exp_codes++"    store i32 "++sym_src++", i32* "++sym_var++"\n"++remaining_codes
 
 stmt :: Stmt -> Codegen String
+
 stmt (Stmt1 (LVal id) e) = do
   exp_codes <- expr e
   sym_tab <- gets symTab
@@ -170,12 +178,64 @@ stmt (Stmt1 (LVal id) e) = do
   let lvar_sym = case lookup id sym_tab of Just j -> j
                                            Nothing -> error $ "LVal "++id++" not found"
   return $ exp_codes++"    store i32 "++lastSym sym_tab++", i32* "++lvar_sym++"\n"
+
 stmt (Stmt2 e) = expr e
+
 stmt StmtSemiColon = return ""
+
 stmt (StmtReturn e) = do
   exp_codes <- expr e
   sym <- gets (lastSym . symTab)
   return $ exp_codes++"    ret i32 "++sym++"\n"
+
+stmt (StmtIfElse c stmt_if stmt_else) = do
+  cond_codes <- cond c
+  sym_tab <- gets symTab
+  case stmt_else of
+    StmtSemiColon -> do
+      sym_tab <- gets symTab
+
+      let if_label = newSym sym_tab
+          cond_sym = lastSym sym_tab
+      modify (\st -> st {symTab = appendSym "" if_label sym_tab})
+
+      s1_codes <- stmt stmt_if
+      sym_tab_if <- gets symTab
+
+      let end_label = newSym sym_tab_if
+      modify (\st -> st {symTab = appendSym "" end_label sym_tab_if})
+
+      let br_if_code = "    br i1 "++cond_sym++", label "++if_label++", label "++end_label++"\n"
+          br_end_code = "    br label "++end_label++"\n"
+      return $ cond_codes++br_if_code++labelCode if_label++s1_codes++br_end_code++labelCode end_label
+    _ -> do
+      sym_tab <- gets symTab
+
+      let if_label = newSym sym_tab
+          cond_sym = lastSym sym_tab
+      modify (\st -> st {symTab = appendSym "" if_label sym_tab})
+
+      if_codes <- stmt stmt_if
+      sym_tab_if <- gets symTab
+
+      let else_label = newSym sym_tab_if
+      modify (\st -> st {symTab = appendSym "" else_label sym_tab_if})
+
+      else_codes <- stmt stmt_else
+      sym_tab_else <- gets symTab
+
+      let end_label = newSym sym_tab_else
+      modify (\st -> st {symTab = appendSym "" end_label sym_tab_else})
+
+      let br_if_code = "    br i1 "++cond_sym++", label "++if_label++", label "++else_label++"\n"
+          br_end_code = "    br label "++end_label++"\n"
+      return $ cond_codes++br_if_code
+        ++labelCode if_label++if_codes++br_end_code
+        ++labelCode else_label++else_codes++br_end_code
+        ++labelCode end_label
+  where labelCode label = "\n"++tail label++":\n"
+
+stmt (StmtBlock b) = block b ""
 
 -- Evaluate const expressions
 evalConstExp e const_tab = evalConstAddExp e const_tab
@@ -202,11 +262,22 @@ evalConstPrimaryExp (PrimaryExp3 (LVal id)) const_tab =
 
 -- Expressions
 
-newSymCode :: (OpCode a) => a -> String -> String -> Codegen String
-newSymCode op operand1 operand2 = do
+unaryOpCodes :: UnaryOp -> String -> Codegen String
+unaryOpCodes LNot operand1 = do
   sym_tab <- gets symTab
   let new_sym = newSym sym_tab
-      new_code = tripleCode (opCode op) new_sym operand1 operand2
+      new_sym_zext = newSym' new_sym
+  modify (\st -> st {symTab = appendSym "" new_sym sym_tab})
+  modify (\st -> st {symTab = appendSym "" new_sym_zext sym_tab})
+  return $ "    "++new_sym++" = icmp eq i32 0, "++operand1++"\n"
+    ++"    "++new_sym_zext++" = zext i1 "++new_sym++" to i32\n"
+unaryOpCodes op operand1 = opCodes op "0" operand1
+  
+opCodes :: (OpCode a) => a -> String -> String -> Codegen String
+opCodes op operand1 operand2 = do
+  sym_tab <- gets symTab
+  let new_sym = newSym sym_tab
+      new_code = tripleCode (opInstr op) new_sym operand1 operand2
   modify (\st -> st {symTab = appendSym "" new_sym sym_tab})
   return new_code
 
@@ -219,18 +290,18 @@ addExp :: AddExp -> Codegen String
 addExp (AddExp1 m) = mulExp m
 
 addExp (AddExp2 m1 op a2)
-  | isNum m1 && isNum a2 = newSymCode op (show . getNum $ m1) (show . getNum $ a2)
+  | isNum m1 && isNum a2 = opCodes op (show . getNum $ m1) (show . getNum $ a2)
   | isNum m1 = do
     a2_codes <- addExp a2
     a2_sym <- gets (lastSym . symTab)
-    new_code <- newSymCode op (show . getNum $ m1) a2_sym
+    new_code <- opCodes op (show . getNum $ m1) a2_sym
     return $ a2_codes++new_code
   | otherwise = do
     m1_codes <- mulExp m1
     m1_sym <- gets (lastSym . symTab)
     a2_codes <- addExp a2
     a2_sym <- gets (lastSym . symTab)
-    new_code <- newSymCode op m1_sym a2_sym
+    new_code <- opCodes op m1_sym a2_sym
     return $ m1_codes++a2_codes++new_code
 
 
@@ -242,21 +313,21 @@ mulExp (MulExp2 u1 op m2)
   | isNum u1 = do
     m2_codes <- mulExp m2
     m2_sym <- gets (lastSym . symTab)
-    new_code <- newSymCode op (show . getNum $ u1) m2_sym
+    new_code <- opCodes op (show . getNum $ u1) m2_sym
     return $ m2_codes++new_code
   | otherwise = do
     u1_codes <- unaryExp u1
     u1_sym <- gets (lastSym . symTab)
     m2_codes <- mulExp m2
     m2_sym <- gets (lastSym . symTab)
-    new_code <- newSymCode op u1_sym m2_sym
+    new_code <- opCodes op u1_sym m2_sym
     return $ u1_codes++m2_codes++new_code
 
 
 unaryExp :: UnaryExp -> Codegen String
 
 unaryExp (UnaryExp1 (PrimaryExp1 e)) = expr e
-unaryExp (UnaryExp1 (PrimaryExp2 n)) = newSymCode Pos "0" (show n)
+unaryExp (UnaryExp1 (PrimaryExp2 n)) = opCodes Pos "0" (show n)
 unaryExp (UnaryExp1 (PrimaryExp3 (LVal id))) = do
   sym_tab <- gets symTab
   const_tab <- gets constTab
@@ -272,20 +343,20 @@ unaryExp (UnaryExp2 op (UnaryExp1 p)) =
   case p of (PrimaryExp1 e) -> do
               e_codes <- expr e
               e_sym <- gets (lastSym . symTab)
-              new_code <- newSymCode op "0" e_sym
+              new_code <- unaryOpCodes op e_sym
               return $ e_codes++new_code
-            (PrimaryExp2 n) -> newSymCode op "0" (show n)
+            (PrimaryExp2 n) -> unaryOpCodes op (show n)
             (PrimaryExp3 (LVal id)) -> do
               u_codes <- unaryExp (UnaryExp1 p)
               u_sym <- gets (lastSym . symTab)
-              new_code <- newSymCode op "0" u_sym
+              new_code <- unaryOpCodes op u_sym
               return $ u_codes++new_code
 
 
 unaryExp (UnaryExp2 op u) = do
   u_codes <- unaryExp u
   u_sym <- gets (lastSym . symTab)
-  new_code <- newSymCode op "0" u_sym
+  new_code <- unaryOpCodes op u_sym
   return $ u_codes++new_code
 
 -- evaluting functions
@@ -312,3 +383,48 @@ unaryExp (UnaryExpCallFunc id es) =
 libFuncs = [("getint", "declare i32 @getint()\n"), ("getch", "declare i32 @getch()\n"),
             ("putint", "declare void @putint(i32)\n"), ("putch", "declare void @putch(i32)\n")]
 
+--------------------------------- cond -----------------------------------------
+cond c = lorExp c
+
+lorExp (LOrExp1 a) = landExp a
+lorExp (LOrExp2 a o) = do
+  a_codes <- landExp a
+  a_sym <- gets (lastSym . symTab)
+  o_codes <- lorExp o
+  o_sym <- gets (lastSym . symTab)
+  sym_tab <- gets symTab
+  let new_sym = newSym sym_tab
+  modify (\st -> st {symTab = ("", new_sym):sym_tab})
+  return $ a_codes++o_codes++"    "++new_sym++" = or i1 "++a_sym++", "++o_sym++"\n"
+
+landExp (LAndExp1 e) = eqExp e
+landExp (LAndExp2 e a) = do
+  e_codes <- eqExp e
+  e_sym <- gets (lastSym . symTab)
+  a_codes <- landExp a
+  a_sym <- gets (lastSym . symTab)
+  sym_tab <- gets symTab
+  let new_sym = newSym sym_tab
+  modify (\st -> st {symTab = ("", new_sym):sym_tab})
+  return $ e_codes++a_codes++"    "++new_sym++" = and i1 "++e_sym++", "++a_sym++"\n"
+
+eqExp (EqExp1 r) = relExp r
+eqExp (EqExp2 (RelExp1 a1) eq (EqExp1 (RelExp1 a2))) = relExp (RelExp2 a1 eq (RelExp1 a2))
+
+relExp (RelExp1 a) = do
+  a_codes <- addExp a
+  a_sym <- gets (lastSym . symTab)
+  sym_tab <- gets symTab
+  let new_sym = newSym sym_tab
+  modify (\st -> st {symTab = appendSym "" new_sym sym_tab})
+  return $ a_codes
+    ++"    "++new_sym++" = icmp ne i32 0, "++a_sym++"\n"
+relExp (RelExp2 a1 cmp (RelExp1 a2)) = do
+  a1_codes <- addExp a1
+  a1_sym <- gets (lastSym . symTab)
+  a2_codes <- addExp a2
+  a2_sym <- gets (lastSym . symTab)
+  sym_tab <- gets symTab
+  let new_sym = newSym sym_tab
+  modify (\st -> st {symTab = ("", new_sym):sym_tab})
+  return $ a1_codes++a2_codes++"    "++new_sym++" = icmp "++cmpInstr cmp++" i32 "++a1_sym++", "++a2_sym++"\n"

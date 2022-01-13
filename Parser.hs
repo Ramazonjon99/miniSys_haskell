@@ -119,8 +119,9 @@ stmt = try
     lexeme $ char ')'
     s1 <- lexeme stmt
     s2 <- option StmtSemiColon (do
-      lexeme $ string "else"
+      string "else"
       lookAhead (noneOf ("_"++['a'..'z']++['A'..'Z']))
+      many whitespace
       stmt)
     return $ StmtIfElse c s1 s2)
 
@@ -168,10 +169,11 @@ unaryExp = try
     return $ UnaryExpCallFunc id es)
   <|> try
   (do
-    c <- lexeme (char '+' <|> char '-')
+    c <- lexeme (char '+' <|> char '-' <|> char '!')
     u <- unaryExp
     let op = case c of '+' -> Pos
                        '-' -> Neg
+                       '!' -> LNot
      in return $ UnaryExp2 op u)
   <|>
   (do
