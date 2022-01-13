@@ -4,12 +4,12 @@ import System.Environment (getArgs)
 import Text.ParserCombinators.Parsec
 import Parser
 import Syntax (CompUnit)
-import Emit
+import Emit (emit)
 
 compile :: String -> String -> Either String String
 compile inputFile input = case parse compUnit inputFile input of
                             (Left l) -> Left (show l)
-                            (Right r) -> emit r
+                            (Right r) -> Right $ emit r
 
 interactWith function inputFile outputFile = do
   input <- readFile inputFile

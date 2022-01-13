@@ -69,7 +69,7 @@ data AddExp = AddExp1 MulExp | AddExp2 MulExp Op1 AddExp
 
 data MulExp = MulExp1 UnaryExp | MulExp2 UnaryExp Op2 MulExp
 
-data UnaryExp = UnaryExp1 PrimaryExp | UnaryExp2 Op1 UnaryExp | UnaryExp3 Ident [Exp]
+data UnaryExp = UnaryExp1 PrimaryExp | UnaryExp2 Op1 UnaryExp | UnaryExpCallFunc Ident [Exp]
   deriving (Show)
 
 data PrimaryExp = PrimaryExp1 Exp | PrimaryExp2 Number | PrimaryExp3 LVal
@@ -94,7 +94,7 @@ instance Show (Op2) where
 
 instance Show (AddExp) where
   show (AddExp1 (MulExp1 (UnaryExp1 (PrimaryExp2 x)))) = show x
-  show (AddExp1 (MulExp1 (UnaryExp3 func es))) = "(UnaryExp3 " ++ show func ++" " ++ show es ++ ")"
+  show (AddExp1 (MulExp1 (UnaryExpCallFunc func es))) = "(UnaryExpCallFunc " ++ show func ++" " ++ show es ++ ")"
   show (AddExp1 (MulExp1 (UnaryExp1 (PrimaryExp3 (LVal var))))) = show var
   show (AddExp1 m) = "(AddExp1 (" ++ show m ++ "))"
   show (AddExp2 m op a) = "(AddExp2 (" ++ show m ++") "++ show op ++" ("++ show a ++ "))"
@@ -108,3 +108,24 @@ instance Show (Block) where
   show (Block []) = "(Block [])"
   show (Block items) = "(Block\n" ++ foldl1 (\a b -> a ++ ",\n" ++ b) (show <$> items) ++ "\n)"
 
+class IsNumber a where
+  isNum :: a -> Bool
+  getNum :: a -> Int
+
+instance IsNumber MulExp where
+  isNum (MulExp1 (UnaryExp1 (PrimaryExp2 n))) = True
+  isNum _ = False
+  getNum (MulExp1 (UnaryExp1 (PrimaryExp2 n))) = n
+  getNum _ = error "the MulExp is not a number"
+
+instance IsNumber AddExp where
+  isNum (AddExp1 (MulExp1 (UnaryExp1 (PrimaryExp2 n)))) = True
+  isNum _ = False
+  getNum (AddExp1 (MulExp1 (UnaryExp1 (PrimaryExp2 n)))) = n
+  getNum _ = error "the AddExp is not a number"
+
+instance IsNumber UnaryExp where
+  isNum (UnaryExp1 (PrimaryExp2 n)) = True
+  isNum _ = False
+  getNum (UnaryExp1 (PrimaryExp2 n)) = n
+  getNum _ = error "the UnaryExp is not a number"

@@ -11,15 +11,15 @@ import Syntax
 compUnit :: Parser CompUnit
 compUnit = do
   many whitespace
-  f <- lexemeA funcDef
+  f <- lexeme funcDef
   return $ CompUnit f
 
 funcDef :: Parser FuncDef
 funcDef = do
-  ft <- lexemeA1 funcType
-  id <- lexemeA ident
-  lexemeA $ char '('
-  lexemeA $ char ')'
+  ft <- lexeme1 funcType
+  id <- lexeme ident
+  lexeme $ char '('
+  lexeme $ char ')'
   b <- block
   return $ FuncDef ft id b
 
@@ -30,8 +30,8 @@ funcType = do
 
 block :: Parser Block
 block = do
-  lexemeA $ char '{'
-  items <- many (lexemeA blockItem)
+  lexeme $ char '{'
+  items <- many (lexeme blockItem)
   char '}'
   return $ Block items
 
@@ -48,15 +48,15 @@ blockItem = try
 decl :: Parser Decl
 decl = try
   (do
-    lexemeA1 $ string "const"
-    t <- lexemeA1 btype
-    ds <- sepBy1 (lexemeA constDef) (lexemeA $ char ',')
+    lexeme1 $ string "const"
+    t <- lexeme1 btype
+    ds <- sepBy1 (lexeme constDef) (lexeme $ char ',')
     char ';'
     return $ ConstDecl t ds)
   <|>
   (do
-    t <- lexemeA1 btype
-    ds <- sepBy1 (lexemeA varDef) (lexemeA $ char ',')
+    t <- lexeme1 btype
+    ds <- sepBy1 (lexeme varDef) (lexeme $ char ',')
     char ';'
     return $ VarDecl t ds)
 
@@ -67,16 +67,16 @@ btype = do
 
 constDef :: Parser ConstDef
 constDef = do
-  id <- lexemeA ident
-  lexemeA $ char '='
+  id <- lexeme ident
+  lexeme $ char '='
   a <- addExp
   return $ ConstDef id a
 
 varDef :: Parser VarDef
 varDef = try
   (do
-    id <- lexemeA ident
-    lexemeA $ char '='
+    id <- lexeme ident
+    lexeme $ char '='
     e <- expr
     return $ VarDef2 id e)
   <|>
@@ -87,14 +87,14 @@ varDef = try
 stmt :: Parser Stmt
 stmt = try
   (do
-    lval <- lexemeA ident
-    lexemeA $ char '='
-    e <- lexemeA expr
+    lval <- lexeme ident
+    lexeme $ char '='
+    e <- lexeme expr
     char ';'
     return $ Stmt1 (LVal lval) e)
   <|> try
   (do
-    e <- lexemeA expr
+    e <- lexeme expr
     char ';'
     return $ Stmt2 e)
   <|> try
@@ -103,8 +103,8 @@ stmt = try
     return $ SemiColon)
   <|>
   (do
-    lexemeA $ string "return"
-    e <- lexemeA expr
+    lexeme $ string "return"
+    e <- lexeme expr
     char ';'
     return $ Return e)
 
@@ -114,8 +114,8 @@ expr = addExp
 addExp :: Parser AddExp
 addExp = try
   (do
-    m <- lexemeA mulExp
-    c <- lexemeA (char '+' <|> char '-')
+    m <- lexeme mulExp
+    c <- lexeme (char '+' <|> char '-')
     a <- addExp
     if c == '+'
     then return $ AddExp2 m Pos a
@@ -128,8 +128,8 @@ addExp = try
 mulExp :: Parser MulExp
 mulExp = try
   (do
-    u <- lexemeA unaryExp
-    c <- lexemeA (char '*' <|> char '/' <|> char '%')
+    u <- lexeme unaryExp
+    c <- lexeme (char '*' <|> char '/' <|> char '%')
     m <- mulExp
     let op = case c of '*' -> Mul
                        '/' -> Div
@@ -143,14 +143,14 @@ mulExp = try
 unaryExp :: Parser UnaryExp
 unaryExp = try
   (do
-    id <- lexemeA ident
-    lexemeA $ char '('
-    es <- sepBy (lexemeA expr) (lexemeA $ char ',')
+    id <- lexeme ident
+    lexeme $ char '('
+    es <- sepBy (lexeme expr) (lexeme $ char ',')
     char ')'
-    return $ UnaryExp3 id es)
+    return $ UnaryExpCallFunc id es)
   <|> try
   (do
-    c <- lexemeA (char '+' <|> char '-')
+    c <- lexeme (char '+' <|> char '-')
     u <- unaryExp
     let op = case c of '+' -> Pos
                        '-' -> Neg
@@ -163,8 +163,8 @@ unaryExp = try
 primaryExp :: Parser PrimaryExp
 primaryExp = try
   (do
-    lexemeA $ char '('
-    e <- lexemeA expr
+    lexeme $ char '('
+    e <- lexeme expr
     char ')'
     return $ PrimaryExp1 e)
   <|> try
@@ -176,10 +176,10 @@ primaryExp = try
     lval <- ident
     return $ PrimaryExp3 (LVal lval))
 
-lexemeA :: Parser a -> Parser a
-lexemeA p = p <* many whitespace
-lexemeA1 :: Parser a -> Parser a
-lexemeA1 p = p <* many1 whitespace
+lexeme :: Parser a -> Parser a
+lexeme p = p <* many whitespace
+lexeme1 :: Parser a -> Parser a
+lexeme1 p = p <* many1 whitespace
 
 whitespace :: Parser ()
 whitespace = void space <|> blockComment <|> lineComment
