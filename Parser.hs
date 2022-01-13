@@ -101,12 +101,30 @@ stmt = try
   (do
     char ';'
     return $ StmtSemiColon)
-  <|>
+  <|> try
   (do
     lexeme $ string "return"
     e <- lexeme expr
     char ';'
     return $ StmtReturn e)
+  <|> try
+  (do
+    b <- block
+    return $ StmtBlock b)
+  <|>
+  (do
+    lexeme $ string "if"
+    lexeme $ char '('
+    c <- lexeme cond
+    lexeme $ char ')'
+    s1 <- lexeme stmt
+    s2 <- option StmtSemiColon (do
+      lexeme $ string "else"
+      lookAhead (noneOf ("_"++['a'..'z']++['A'..'Z']))
+      stmt)
+    return $ StmtIfElse c s1 s2)
+
+--------------------------------- Exp ------------------------------------------
 
 expr :: Parser Exp
 expr = addExp
@@ -175,6 +193,58 @@ primaryExp = try
   (do
     lval <- ident
     return $ PrimaryExp3 (LVal lval))
+
+----------------------------- Cond ---------------------------------------------
+cond :: Parser Cond
+cond = lorExp
+
+lorExp :: Parser LOrExp
+lorExp = try
+  (do
+    a <- lexeme landExp
+    lexeme $ string "||"
+    o <- lorExp
+    return $ LOrExp2 a o)
+  <|>
+  (do
+    a <- landExp
+    return $ LOrExp1 a)
+
+landExp :: Parser LAndExp
+landExp = try
+  (do
+    e <- lexeme eqExp
+    lexeme $ string "&&"
+    a <- landExp
+    return $ LAndExp2 e a)
+  <|>
+  (do
+    e <- eqExp
+    return $ LAndExp1 e)
+
+eqExp :: Parser EqExp
+eqExp = try
+  (do
+    r <- lexeme relExp
+    eq <- lexeme $ string "==" <|> string "!="
+    e <- eqExp
+    return $ EqExp2 r eq e)
+  <|>
+  (do
+    r <- relExp
+    return $ EqExp1 r)
+
+relExp :: Parser RelExp
+relExp = try
+  (do
+    a <- lexeme addExp
+    rel <- lexeme $ try (string "<=") <|> try (string ">=") <|> string "<" <|> string ">"
+    r <- relExp
+    return $ RelExp2 a rel r)
+  <|>
+  (do
+    a <- addExp
+    return $ RelExp1 a)
 
 lexeme :: Parser a -> Parser a
 lexeme p = p <* many whitespace

@@ -73,7 +73,7 @@ data Stmt = Stmt1 LVal Exp
           | Stmt2 Exp
           | StmtSemiColon
           | StmtReturn Exp
-          | StmtIfElse Cond Stmt Stmt
+          | StmtIfElse Cond Stmt Stmt  -- the second stmt will be StmtSemiColon if the `else` branch is missing
           | StmtBlock Block
   deriving (Show)
 
@@ -100,10 +100,10 @@ data LOrExp = LOrExp1 LAndExp | LOrExp2 LAndExp LOrExp
 data LAndExp = LAndExp1 EqExp | LAndExp2 EqExp LAndExp
   deriving (Show)
 
-data EqExp = EqExp1 RelExp | EqExp2 RelExp EqExp
+data EqExp = EqExp1 RelExp | EqExp2 RelExp String EqExp
   deriving (Show)
 
-data RelExp = RelExp1 AddExp | RelExp2 AddExp RelExp
+data RelExp = RelExp1 AddExp | RelExp2 AddExp String RelExp
   deriving (Show)
 
 type Number = Int

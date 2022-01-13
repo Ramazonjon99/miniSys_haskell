@@ -8,13 +8,14 @@ import qualified Data.Map as Map
 
 emit :: CompUnit -> String
 emit (CompUnit f) =
-  let ret = runState (runCodegen (funcDef f))
-                     (CodegenState { symTab = []
-                                   , constTab = Map.empty
-                                   , curBlkName = 0
-                                   , blkTab = Map.empty
-                                   , calledFuncs = Map.empty})
-   in Map.foldr (++) "" (calledFuncs $ snd $ ret) ++ fst ret
+  show f
+  --let ret = runState (runCodegen (funcDef f))
+  --                   (CodegenState { symTab = []
+  --                                 , constTab = Map.empty
+  --                                 , curBlkName = 0
+  --                                 , blkTab = Map.empty
+  --                                 , calledFuncs = Map.empty})
+  -- in Map.foldr (++) "" (calledFuncs $ snd $ ret) ++ fst ret
 
 class OpCode a where
   opCode :: a -> String
