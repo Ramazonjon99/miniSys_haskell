@@ -6,14 +6,6 @@ import Control.Monad
 import Control.Monad.State
 import qualified Data.Map as Map
 
---emit :: CompUnit -> Either String String
---emit (CompUnit (FuncDef TypeInt Main (Block (Return expr)))) = do
---  codeExp <- codegenExp [] expr 
---  return $ "define dso_local i32 @main() {\n" ++ snd codeExp
---    ++ "    ret i32 " ++ head (fst codeExp) ++ "\n}"
-
--- Codegen primitives
-
 emit :: CompUnit -> String
 emit (CompUnit f) =
   let ret = runState (runCodegen (funcDef f))
@@ -27,18 +19,26 @@ emit (CompUnit f) =
 class OpCode a where
   opCode :: a -> String
   evalConstOp :: a -> Int -> Int -> Int
-instance OpCode Op1 where
-  opCode Pos = "add"
-  opCode Neg = "sub"
-  evalConstOp Pos a b = (a + b)
-  evalConstOp Neg a b = (a - b)
-instance OpCode Op2 where
+instance OpCode AddOp where
+  opCode Add = "add"
+  opCode Sub = "sub"
+  evalConstOp Add a b = (a + b)
+  evalConstOp Sub a b = (a - b)
+instance OpCode MulOp where
   opCode Mul = "mul"
   opCode Div = "sdiv"
   opCode Mod = "srem"
   evalConstOp Mul a b = (a * b)
   evalConstOp Div a b = (a `div` b)
   evalConstOp Mod a b = (a `rem` b)
+instance OpCode UnaryOp where
+  opCode LNot = "TODO"
+  opCode Pos = "add"
+  opCode Neg = "sub"
+  evalConstOp Pos 0 b = b
+  evalConstOp Neg 0 b = -b
+  evalConstOp LNot 0 b = error "evalConstExp LNot not implemented because bool type is not supported"
+  evalConstOp _ _ _ = error "UnaryOp should be called with the first argument 0"
 
 tripleCode :: String -> String -> String -> String -> String
 tripleCode op dest src1 src2  = "    " ++ dest ++ " = " ++ op ++ " i32 "
@@ -170,8 +170,8 @@ stmt (Stmt1 (LVal id) e) = do
                                            Nothing -> error $ "LVal "++id++" not found"
   return $ exp_codes++"    store i32 "++lastSym sym_tab++", i32* "++lvar_sym++"\n"
 stmt (Stmt2 e) = expr e
-stmt SemiColon = return ""
-stmt (Return e) = do
+stmt StmtSemiColon = return ""
+stmt (StmtReturn e) = do
   exp_codes <- expr e
   sym <- gets (lastSym . symTab)
   return $ exp_codes++"    ret i32 "++sym++"\n"
@@ -189,7 +189,7 @@ evalConstMulExp (MulExp2 u op m) const_tab = liftM2 (evalConstOp op) (evalConstU
 
 evalConstUnaryExp :: UnaryExp -> ConstTable -> Either String Int
 evalConstUnaryExp (UnaryExp1 p) const_tab = evalConstPrimaryExp p const_tab
-evalConstUnaryExp (UnaryExp2 op u) const_tab = liftM (\x -> if op == Pos then x else (0-x)) (evalConstUnaryExp u const_tab)
+evalConstUnaryExp (UnaryExp2 op u) const_tab = liftM (evalConstOp op 0) (evalConstUnaryExp u const_tab)
 evalConstUnaryExp (UnaryExpCallFunc i _) const_tab = Left "using function call in a const context"
 
 evalConstPrimaryExp :: PrimaryExp -> ConstTable -> Either String Int

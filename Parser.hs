@@ -100,13 +100,13 @@ stmt = try
   <|> try
   (do
     char ';'
-    return $ SemiColon)
+    return $ StmtSemiColon)
   <|>
   (do
     lexeme $ string "return"
     e <- lexeme expr
     char ';'
-    return $ Return e)
+    return $ StmtReturn e)
 
 expr :: Parser Exp
 expr = addExp
@@ -118,8 +118,8 @@ addExp = try
     c <- lexeme (char '+' <|> char '-')
     a <- addExp
     if c == '+'
-    then return $ AddExp2 m Pos a
-    else return $ AddExp2 m Neg a)
+    then return $ AddExp2 m Add a
+    else return $ AddExp2 m Sub a)
   <|>
   (do
     m <- mulExp

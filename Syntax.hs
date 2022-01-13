@@ -15,30 +15,42 @@ module Syntax where
 --Block        -> '{' { BlockItem } '}'
 --BlockItem    -> Decl | Stmt
 --Stmt         -> LVal '=' Exp ';'
+--                | Block
 --                | [Exp] ';'
---                | 'return' Exp ';'
+--                | 'if' '(' Cond ')' Stmt [ 'else' Stmt ]
+--                | 'return' Exp ';' // [changed]
 --Exp          -> AddExp
+--Cond         -> LOrExp // [new]
 --LVal         -> Ident
 --PrimaryExp   -> '(' Exp ')' | LVal | Number
---AddExp       -> MulExp
---                | AddExp ('+' | '−') MulExp
---MulExp       -> UnaryExp
---                | MulExp ('*' | '/' | '%') UnaryExp
 --UnaryExp     -> PrimaryExp
 --                | Ident '(' [FuncRParams] ')'
 --                | UnaryOp UnaryExp
+--UnaryOp      -> '+' | '-' | '!'  // 保证 '!' 只出现在 Cond 中 [changed]
 --FuncRParams  -> Exp { ',' Exp }
---UnaryOp      -> '+' | '-'
+--MulExp       -> UnaryExp
+--                | MulExp ('*' | '/' | '%') UnaryExp
+--AddExp       -> MulExp
+--                | AddExp ('+' | '-') MulExp
+--RelExp       -> AddExp
+--                | RelExp ('<' | '>' | '<=' | '>=') AddExp  // [new]
+--EqExp        -> RelExp
+--                | EqExp ('==' | '!=') RelExp  // [new]
+--LAndExp      -> EqExp
+--                | LAndExp '&&' EqExp  // [new]
+--LOrExp       -> LAndExp
+--                | LOrExp '||' LAndExp  // [new]
+
 data CompUnit = CompUnit FuncDef
   deriving (Show)
 
 data Decl = ConstDecl BType [ConstDef] | VarDecl BType [VarDef]
   deriving (Show)
 
-data BType = BInt
+data ConstDef = ConstDef Ident AddExp
   deriving (Show)
 
-data ConstDef = ConstDef Ident AddExp
+data BType = BInt
   deriving (Show)
 
 data VarDef = VarDef1 Ident | VarDef2 Ident Exp
@@ -57,40 +69,53 @@ data Block = Block [BlockItem]
 data BlockItem = BlockItem1 Decl | BlockItem2 Stmt
   deriving (Show)
 
-data Stmt = Stmt1 LVal Exp | Stmt2 Exp | SemiColon | Return Exp
+data Stmt = Stmt1 LVal Exp
+          | Stmt2 Exp
+          | StmtSemiColon
+          | StmtReturn Exp
+          | StmtIfElse Cond Stmt Stmt
+          | StmtBlock Block
   deriving (Show)
 
 type Exp = AddExp
 
+type Cond = LOrExp
+
 data LVal = LVal Ident
   deriving (Show)
 
-data AddExp = AddExp1 MulExp | AddExp2 MulExp Op1 AddExp
+data AddExp = AddExp1 MulExp | AddExp2 MulExp AddOp AddExp
 
-data MulExp = MulExp1 UnaryExp | MulExp2 UnaryExp Op2 MulExp
+data MulExp = MulExp1 UnaryExp | MulExp2 UnaryExp MulOp MulExp
 
-data UnaryExp = UnaryExp1 PrimaryExp | UnaryExp2 Op1 UnaryExp | UnaryExpCallFunc Ident [Exp]
+data UnaryExp = UnaryExp1 PrimaryExp | UnaryExp2 UnaryOp UnaryExp | UnaryExpCallFunc Ident [Exp]
   deriving (Show)
 
 data PrimaryExp = PrimaryExp1 Exp | PrimaryExp2 Number | PrimaryExp3 LVal
   deriving (Show)
 
+data LOrExp = LOrExp1 LAndExp | LOrExp2 LAndExp LOrExp
+  deriving (Show)
+
+data LAndExp = LAndExp1 EqExp | LAndExp2 EqExp LAndExp
+  deriving (Show)
+
+data EqExp = EqExp1 RelExp | EqExp2 RelExp EqExp
+  deriving (Show)
+
+data RelExp = RelExp1 AddExp | RelExp2 AddExp RelExp
+  deriving (Show)
+
 type Number = Int
 
-data Op1 = Pos | Neg
-  deriving (Eq)
+data AddOp = Add | Sub
+  deriving (Show, Eq)
 
-data Op2 = Mul | Div | Mod
-  deriving (Eq)
+data MulOp = Mul | Div | Mod
+  deriving (Show, Eq)
 
-instance Show (Op1) where
-  show Pos = "+"
-  show Neg = "-"
-
-instance Show (Op2) where
-  show Mul = "*"
-  show Div = "/"
-  show Mod = "%"
+data UnaryOp = LNot | Pos | Neg
+  deriving (Show, Eq)
 
 instance Show (AddExp) where
   show (AddExp1 (MulExp1 (UnaryExp1 (PrimaryExp2 x)))) = show x
