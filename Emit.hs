@@ -454,39 +454,69 @@ addExp :: AddExp -> Codegen String
 
 addExp (AddExp1 m) = mulExp m
 
-addExp (AddExp2 m1 op a2)
-  | isNum m1 && isNum a2 = opCodes op (show . getNum $ m1) (show . getNum $ a2)
-  | isNum m1 = do
-    a2_codes <- addExp a2
-    a2_sym <- gets (lastSym . symTab)
-    new_code <- opCodes op (show . getNum $ m1) a2_sym
-    return $ a2_codes++new_code
-  | otherwise = do
-    m1_codes <- mulExp m1
-    m1_sym <- gets (lastSym . symTab)
-    a2_codes <- addExp a2
-    a2_sym <- gets (lastSym . symTab)
-    new_code <- opCodes op m1_sym a2_sym
-    return $ m1_codes++a2_codes++new_code
+addExp (AddExp2 m1 op (AddExp1 m2)) = do
+  codes1 <- mulExp m1
+  sym1 <- gets (lastSym . symTab)
+  codes2 <- mulExp m2
+  sym2 <- gets (lastSym . symTab)
+  new_code <- opCodes op sym1 sym2
+  return $ codes1++codes2++new_code
+addExp (AddExp2 m1 op (AddExp2 m2 op2 a3)) = do
+  codes1 <- addExp (AddExp2 m1 op (AddExp1 m2))
+  sym1 <- gets (lastSym . symTab)
+  codes2 <- addExp a3
+  sym2 <- gets (lastSym . symTab)
+  new_code <- opCodes op2 sym1 sym2
+  return $ codes1++codes2++new_code
+
+--addExp (AddExp2 m1 op a2)
+--  | isNum m1 && isNum a2 = opCodes op (show . getNum $ m1) (show . getNum $ a2)
+--  | isNum m1 = do
+--    a2_codes <- addExp a2
+--    a2_sym <- gets (lastSym . symTab)
+--    new_code <- opCodes op (show . getNum $ m1) a2_sym
+--    return $ a2_codes++new_code
+--  | otherwise = do
+--    m1_codes <- mulExp m1
+--    m1_sym <- gets (lastSym . symTab)
+--    a2_codes <- addExp a2
+--    a2_sym <- gets (lastSym . symTab)
+--    new_code <- opCodes op m1_sym a2_sym
+--    return $ m1_codes++a2_codes++new_code
 
 
 mulExp :: MulExp -> Codegen String
 
 mulExp (MulExp1 u) = unaryExp u
 
-mulExp (MulExp2 u1 op m2)
-  | isNum u1 = do
-    m2_codes <- mulExp m2
-    m2_sym <- gets (lastSym . symTab)
-    new_code <- opCodes op (show . getNum $ u1) m2_sym
-    return $ m2_codes++new_code
-  | otherwise = do
-    u1_codes <- unaryExp u1
-    u1_sym <- gets (lastSym . symTab)
-    m2_codes <- mulExp m2
-    m2_sym <- gets (lastSym . symTab)
-    new_code <- opCodes op u1_sym m2_sym
-    return $ u1_codes++m2_codes++new_code
+mulExp (MulExp2 u1 op (MulExp1 u2)) = do
+  codes1 <- unaryExp u1
+  sym1 <- gets (lastSym . symTab)
+  codes2 <- unaryExp u2
+  sym2 <- gets (lastSym . symTab)
+  new_code <- opCodes op sym1 sym2
+  return $ codes1++codes2++new_code
+mulExp (MulExp2 u1 op (MulExp2 u2 op2 m3)) = do
+  codes1 <- mulExp (MulExp2 u1 op (MulExp1 u2))
+  sym1 <- gets (lastSym . symTab)
+  codes2 <- mulExp m3
+  sym2 <- gets (lastSym . symTab)
+  new_code <- opCodes op2 sym1 sym2
+  return $ codes1++codes2++new_code
+
+--mulExp (MulExp2 u1 op m2)
+--  | isNum u1 = do
+--    m2_codes <- mulExp m2
+--    m2_sym <- gets (lastSym . symTab)
+--    new_code <- opCodes op (show . getNum $ u1) m2_sym
+--    return $ m2_codes++new_code
+--  | otherwise = do
+--    u1_codes <- unaryExp u1
+--    u1_sym <- gets (lastSym . symTab)
+--    m2_codes <- mulExp m2
+--    m2_sym <- gets (lastSym . symTab)
+--    new_code <- opCodes op u1_sym m2_sym
+--    return $ u1_codes++m2_codes++new_code
 
 
 unaryExp :: UnaryExp -> Codegen String
