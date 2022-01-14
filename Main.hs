@@ -13,8 +13,9 @@ compile inputFile input = case parse compUnit inputFile input of
 
 interactWith function inputFile outputFile = do
   input <- readFile inputFile
-  case (function inputFile input) of (Right r) -> writeFile outputFile r
-                                     (Left l) -> error l
+  error $ input
+  --case (function inputFile input) of (Right r) -> writeFile outputFile r
+  --                                   (Left l) -> error l
 
 main = mainWith compile
   where mainWith function = do
