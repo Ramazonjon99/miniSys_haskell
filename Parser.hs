@@ -11,8 +11,9 @@ import Syntax
 compUnit :: Parser CompUnit
 compUnit = do
   many whitespace
+  decls <- many $ lexeme $ try decl
   f <- lexeme funcDef
-  return $ CompUnit f
+  return $ CompUnit decls f
 
 funcDef :: Parser FuncDef
 funcDef = do
@@ -94,19 +95,54 @@ stmt = try
     return $ Stmt1 (LVal lval) e)
   <|> try
   (do
-    e <- lexeme expr
+    lexeme $ reserved "break"
     char ';'
-    return $ Stmt2 e)
+    return $ StmtBreak)
+  <|> try
+  (do                              -- continue
+    lexeme $ reserved "continue"
+    char ';'
+    return $ StmtContinue)
   <|> try
   (do
     char ';'
-    return $ SemiColon)
-  <|>
+    return $ StmtSemiColon)
+  <|> try
   (do
-    lexeme $ string "return"
+    lexeme $ reserved "return"
     e <- lexeme expr
     char ';'
-    return $ Return e)
+    return $ StmtReturn e)
+  <|> try
+  (do
+    b <- block
+    return $ StmtBlock b)
+  <|> try
+  (do
+    lexeme $ string "if"
+    lexeme $ char '('
+    c <- lexeme cond
+    lexeme $ char ')'
+    s1 <- lexeme stmt
+    s2 <- option StmtSemiColon (do
+      lexeme $ reserved "else"
+      stmt)
+    return $ StmtIfElse c s1 s2)
+  <|> try
+  (do
+    lexeme $ string "while"
+    lexeme $ char '('
+    c <- lexeme cond
+    lexeme $ char ')'
+    s <- stmt
+    return $ StmtWhile c s)
+  <|>
+  (do                              -- expr: e.g. 1 + 1;
+    e <- lexeme expr
+    char ';'
+    return $ Stmt2 e)
+
+--------------------------------- Exp ------------------------------------------
 
 expr :: Parser Exp
 expr = addExp
@@ -118,8 +154,8 @@ addExp = try
     c <- lexeme (char '+' <|> char '-')
     a <- addExp
     if c == '+'
-    then return $ AddExp2 m Pos a
-    else return $ AddExp2 m Neg a)
+    then return $ AddExp2 m Add a
+    else return $ AddExp2 m Sub a)
   <|>
   (do
     m <- mulExp
@@ -150,10 +186,11 @@ unaryExp = try
     return $ UnaryExpCallFunc id es)
   <|> try
   (do
-    c <- lexeme (char '+' <|> char '-')
+    c <- lexeme (char '+' <|> char '-' <|> char '!')
     u <- unaryExp
     let op = case c of '+' -> Pos
                        '-' -> Neg
+                       '!' -> LNot
      in return $ UnaryExp2 op u)
   <|>
   (do
@@ -176,10 +213,64 @@ primaryExp = try
     lval <- ident
     return $ PrimaryExp3 (LVal lval))
 
+----------------------------- Cond ---------------------------------------------
+cond :: Parser Cond
+cond = lorExp
+
+lorExp :: Parser LOrExp
+lorExp = try
+  (do
+    a <- lexeme landExp
+    lexeme $ string "||"
+    o <- lorExp
+    return $ LOrExp2 a o)
+  <|>
+  (do
+    a <- landExp
+    return $ LOrExp1 a)
+
+landExp :: Parser LAndExp
+landExp = try
+  (do
+    e <- lexeme eqExp
+    lexeme $ string "&&"
+    a <- landExp
+    return $ LAndExp2 e a)
+  <|>
+  (do
+    e <- eqExp
+    return $ LAndExp1 e)
+
+eqExp :: Parser EqExp
+eqExp = try
+  (do
+    r <- lexeme relExp
+    eq <- lexeme $ string "==" <|> string "!="
+    e <- eqExp
+    return $ EqExp2 r eq e)
+  <|>
+  (do
+    r <- relExp
+    return $ EqExp1 r)
+
+relExp :: Parser RelExp
+relExp = try
+  (do
+    a <- lexeme addExp
+    rel <- lexeme $ try (string "<=") <|> try (string ">=") <|> string "<" <|> string ">"
+    r <- relExp
+    return $ RelExp2 a rel r)
+  <|>
+  (do
+    a <- addExp
+    return $ RelExp1 a)
+
 lexeme :: Parser a -> Parser a
 lexeme p = p <* many whitespace
 lexeme1 :: Parser a -> Parser a
 lexeme1 p = p <* many1 whitespace
+reserved :: String -> Parser String
+reserved s = string s <* lookAhead (noneOf ("_"++['a'..'z']++['A'..'Z']))
 
 whitespace :: Parser ()
 whitespace = void space <|> blockComment <|> lineComment
