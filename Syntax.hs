@@ -1,5 +1,5 @@
 module Syntax where
---CompUnit     -> FuncDef
+--CompUnit     -> Decl* FuncDef
 --Decl         -> ConstDecl | VarDecl
 --ConstDecl    -> 'const' BType ConstDef { ',' ConstDef } ';'
 --BType        -> 'int'
@@ -41,7 +41,7 @@ module Syntax where
 --LOrExp       -> LAndExp
 --                | LOrExp '||' LAndExp  // [new]
 
-data CompUnit = CompUnit FuncDef
+data CompUnit = CompUnit [Decl] FuncDef
   deriving (Show)
 
 data Decl = ConstDecl BType [ConstDef] | VarDecl BType [VarDef]

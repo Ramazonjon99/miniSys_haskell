@@ -11,8 +11,9 @@ import Syntax
 compUnit :: Parser CompUnit
 compUnit = do
   many whitespace
+  decls <- many $ lexeme $ try decl
   f <- lexeme funcDef
-  return $ CompUnit f
+  return $ CompUnit decls f
 
 funcDef :: Parser FuncDef
 funcDef = do

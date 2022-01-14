@@ -2,15 +2,15 @@
 module Emit where
 
 import Syntax
+import Data.Char (ord, chr)
 import Control.Monad
 import Control.Monad.State
 import qualified Data.Map as Map
 
 emit :: CompUnit -> String
-emit (CompUnit f) =
-  let ret = runState (runCodegen (funcDef f))
+emit cu =
+  let ret = runState (runCodegen (compUnit cu))
                      (CodegenState { symTab = []
-                                   , constTab = Map.empty
                                    , curBlkName = 0
                                    , blkTab = Map.empty
                                    , calledFuncs = Map.empty})
@@ -59,18 +59,21 @@ type BlockName = Int
 -- VarName could be "" when a symbol refers to a temp variable other than a
 -- variable in source codes.
 type SymbolTable = [(VarName, Symbol)]
-type ConstTable = Map.Map VarName Int
+
+type VarTable = Map.Map VarName Symbol
+type ConstVarTable = Map.Map VarName Int
 
 data CodegenState = CodegenState {
     symTab :: SymbolTable
-  , constTab :: ConstTable
-  , curBlkName :: BlockName
+  , curBlkName :: BlockName  -- -1 for global
   , blkTab :: Map.Map BlockName BlockState
   , calledFuncs :: Map.Map String String
   } deriving (Show)
 
 data BlockState = BlockState {
     blkSym :: String  -- could be ""
+  , blkVarTab :: VarTable  -- variables declared in this block
+  , blkConstVarTab :: ConstVarTable  -- const variables declared in this block
   , closureBlkNames :: [BlockName]
   } deriving (Show)
 
@@ -85,10 +88,111 @@ newSym symtab = "%" ++ show (read (tail $ snd $ head symtab) + 1)
 
 newSym' sym = "%" ++ show (read (tail sym) + 1)
 
+newGlobalSym :: VarTable -> Symbol
+newGlobalSym var_tab =
+  if Map.null var_tab
+  then "@a"
+  else Map.foldr (\a b -> nextSym' (max a b)) "@a" var_tab
+  where nextSym' s
+          | last s == 'z' = s++"a"
+          | otherwise = init s ++ [chr ((ord $ last s) + 1)]
+
 appendSym :: VarName -> Symbol -> SymbolTable -> SymbolTable
 appendSym var sym sym_tab = (var, sym):sym_tab
 
+iterateClosures :: (BlockState -> Maybe b) -> BlockName -> CodegenState -> Maybe b
+iterateClosures f blk_name st =
+  let cur_blk = blkTab st Map.! blk_name
+   in case f cur_blk of
+        Just j -> Just j
+        Nothing -> case closureBlkNames cur_blk of
+          [] -> Nothing
+          _ -> iterateClosures f (head $ closureBlkNames cur_blk) st
+
+lookupVarRecur id st =
+  let blk_name = curBlkName st
+   in iterateClosures (lookupVar' id) blk_name st
+  where lookupVar' id blk = Map.lookup id (blkVarTab blk)
+
+lookupConstVarRecur id st =
+  let blk_name = curBlkName st
+   in iterateClosures (lookupConstVar' id) blk_name st
+  where lookupConstVar' id blk = Map.lookup id (blkConstVarTab blk)
+
+lookupVar id st =
+  let blk_name = curBlkName st
+      cur_blk = blkTab st Map.! blk_name
+   in Map.lookup id (blkVarTab cur_blk)
+
+lookupConstVar id st =
+  let blk_name = curBlkName st
+      cur_blk = blkTab st Map.! blk_name
+   in Map.lookup id (blkConstVarTab cur_blk)
+
+insertVar :: VarName -> Symbol -> CodegenState -> CodegenState
+insertVar id sym st =
+  let blk_name = curBlkName st
+      blk_tab = blkTab st
+      cur_blk = blk_tab Map.! blk_name
+      blk_var_tab = blkVarTab cur_blk
+      new_blk = cur_blk {blkVarTab = Map.insert id sym blk_var_tab}
+      new_blk_tab = Map.insert blk_name new_blk blk_tab
+   in st {blkTab = new_blk_tab}
+
+insertConstVar :: VarName -> Int -> CodegenState -> CodegenState
+insertConstVar id n st =
+  let blk_name = curBlkName st
+      blk_tab = blkTab st
+      cur_blk = blk_tab Map.! blk_name
+      blk_const_var_tab = blkConstVarTab cur_blk
+      new_blk = cur_blk {blkConstVarTab = Map.insert id n blk_const_var_tab}
+      new_blk_tab = Map.insert blk_name new_blk blk_tab
+   in st {blkTab = new_blk_tab}
+
 -- Codegen
+
+compUnit :: CompUnit -> Codegen String
+compUnit (CompUnit global_decls f) = do
+  blk_tab <- gets blkTab
+  modify (\st -> st { blkTab = Map.insert (-1) (BlockState { blkSym = ""
+                                                           , blkVarTab = Map.empty
+                                                           , blkConstVarTab = Map.empty
+                                                           , closureBlkNames = []}) blk_tab
+                    , curBlkName = -1})
+  liftM2 (++) (globalDecls global_decls) (funcDef f)
+
+globalDecls [] = return ""
+globalDecls (gd:gds) = liftM2 (++) (globalDecl gd) (globalDecls gds)
+
+
+globalDecl (ConstDecl BInt cds) = decl (ConstDecl BInt cds)
+
+globalDecl (VarDecl BInt []) = return ""
+
+globalDecl (VarDecl BInt ((VarDef1 id):vds)) = do
+  st <- get
+  case lookupVar id st of Nothing -> return ""
+                          Just _ -> error $ "variable "++id++" already exists"
+  let var_tab = blkVarTab (blkTab st Map.! (-1))
+      new_sym = newGlobalSym var_tab
+  modify (insertVar id new_sym)
+
+  remaining_codes <- globalDecl (VarDecl BInt vds)
+  return $ new_sym++" = dso_local global i32 0\n"++remaining_codes
+
+globalDecl (VarDecl BInt ((VarDef2 id e):vds)) = do
+  st <- get
+  case lookupVar id st of Nothing -> return ""
+                          Just _ -> error $ "variable "++id++" already exists"
+  let var_tab = blkVarTab (blkTab st Map.! (-1))
+      new_sym = newGlobalSym var_tab
+      e_int = case evalConstExp e st of Right r -> r
+                                        Left l -> error $ show l++"\n    in "++show e
+  modify (insertVar id new_sym)
+
+  remaining_codes <- globalDecl (VarDecl BInt vds)
+  return $ new_sym++" = dso_local global i32 "++show e_int++"\n"++remaining_codes
+
 
 funcDef :: FuncDef -> Codegen String
 funcDef (FuncDef t id b) = do
@@ -101,19 +205,25 @@ funcDef (FuncDef t id b) = do
 block :: Block -> String -> Codegen String
 block (Block items) blk_sym= do
   st <- get
-  let bs = blkTab st
+  let blk_tab = blkTab st
       cur_blk_name = curBlkName st
       new_blk_name = newBlockName cur_blk_name
-      bs' = Map.insert
+      new_blk_tab = Map.insert
         new_blk_name
-        (BlockState {blkSym = blk_sym, closureBlkNames = getClosureBlockNames cur_blk_name bs})
-        bs
-  put (st {blkTab = bs'})
+        (BlockState { blkSym = blk_sym
+                    , blkVarTab = Map.empty
+                    , blkConstVarTab = Map.empty
+                    , closureBlkNames = newClosureBlockNames cur_blk_name blk_tab})
+        blk_tab
+  modify (\st -> st {curBlkName = new_blk_name, blkTab = new_blk_tab})
 
   items' <- blockItems items
+
+  modify (\st -> st {curBlkName = cur_blk_name})
+
   return $ foldl1 (++) items'
-  where getClosureBlockNames 0 bs = []
-        getClosureBlockNames cur_blk_name bs = cur_blk_name:(closureBlkNames (bs Map.! cur_blk_name))
+
+  where newClosureBlockNames cur_blk_name bs = cur_blk_name:(closureBlkNames (bs Map.! cur_blk_name))
         newBlockName blk_name = blk_name + 1
 
 blockItems :: [BlockItem] -> Codegen [String]
@@ -133,14 +243,13 @@ decl :: Decl -> Codegen String
 decl (ConstDecl BInt []) = return ""
 
 decl (ConstDecl BInt ((ConstDef id e):cds)) = do
-  const_tab <- gets constTab
-  case Map.lookup id const_tab of Nothing -> return ""
-                                  Just _ -> error $ "const variable "++id++" already exists"
-  let e_int = case evalConstExp e const_tab of Right r -> r
-                                               Left l -> error $ show l++"\n    in "++show e
-      new_const_tab = Map.insert id e_int const_tab
+  st <- get
+  case lookupConstVar id st of Nothing -> return ""
+                               Just _ -> error $ "const variable "++id++" already exists"
+  let e_int = case evalConstExp e st of Right r -> r
+                                        Left l -> error $ show l++"\n    in "++show e
   if e_int == e_int  -- force evaluating the thunk e_int
-  then do modify (\st -> st {constTab = new_const_tab})
+  then do modify (insertConstVar id e_int)
           decl (ConstDecl BInt cds)
   else return ""
 
@@ -148,11 +257,13 @@ decl (ConstDecl BInt ((ConstDef id e):cds)) = do
 decl (VarDecl BInt []) = return ""
 
 decl (VarDecl BInt ((VarDef1 id):vds)) = do
-  sym_tab <- gets symTab
-  case lookup id sym_tab of Nothing -> return ""
-                            Just _ -> error $ "variable "++id++" already exists"
-  let new_sym = newSym sym_tab
-  modify (\st -> st {symTab = appendSym  id new_sym sym_tab})
+  st <- get
+  case lookupVar id st of Nothing -> return ""
+                          Just _ -> error $ "variable "++id++" already exists"
+  let sym_tab = symTab st
+      new_sym = newSym sym_tab
+  modify (\st -> st {symTab = appendSym id new_sym sym_tab})
+  modify (insertVar id new_sym)
   remaining_codes <- decl (VarDecl BInt vds)
   return $ "    "++new_sym++" = alloca i32\n"++remaining_codes
 
@@ -173,11 +284,10 @@ stmt :: Stmt -> Codegen String
 
 stmt (Stmt1 (LVal id) e) = do
   exp_codes <- expr e
-  sym_tab <- gets symTab
-  const_tab <- gets constTab
-  let lvar_sym = case lookup id sym_tab of Just j -> j
-                                           Nothing -> error $ "LVal "++id++" not found"
-  return $ exp_codes++"    store i32 "++lastSym sym_tab++", i32* "++lvar_sym++"\n"
+  st <- get
+  let lvar_sym = case lookupVarRecur id st of Just j -> j
+                                              Nothing -> error $ "LVal "++id++" not found"
+  return $ exp_codes++"    store i32 "++lastSym (symTab st)++", i32* "++lvar_sym++"\n"
 
 stmt (Stmt2 e) = expr e
 
@@ -185,8 +295,9 @@ stmt StmtSemiColon = return ""
 
 stmt (StmtReturn e) = do
   exp_codes <- expr e
-  sym <- gets (lastSym . symTab)
-  return $ exp_codes++"    ret i32 "++sym++"\n"
+  sym_tab <- gets symTab
+  modify (\st -> st {symTab = ("", newSym sym_tab):sym_tab})
+  return $ exp_codes++"    ret i32 "++lastSym sym_tab++"\n"
 
 stmt (StmtIfElse c stmt_if stmt_else) = do
   cond_codes <- cond c
@@ -240,25 +351,25 @@ stmt (StmtBlock b) = block b ""
 -- Evaluate const expressions
 evalConstExp e const_tab = evalConstAddExp e const_tab
 
-evalConstAddExp :: AddExp -> ConstTable -> Either String Int
+evalConstAddExp :: AddExp -> CodegenState -> Either String Int
 evalConstAddExp (AddExp1 m) const_tab = evalConstMulExp m const_tab
 evalConstAddExp (AddExp2 m op a) const_tab = liftM2 (evalConstOp op) (evalConstMulExp m const_tab) (evalConstAddExp a const_tab)
 
-evalConstMulExp :: MulExp -> ConstTable -> Either String Int
+evalConstMulExp :: MulExp -> CodegenState -> Either String Int
 evalConstMulExp (MulExp1 u) const_tab = evalConstUnaryExp u const_tab
 evalConstMulExp (MulExp2 u op m) const_tab = liftM2 (evalConstOp op) (evalConstUnaryExp u const_tab) (evalConstMulExp m const_tab)
 
-evalConstUnaryExp :: UnaryExp -> ConstTable -> Either String Int
+evalConstUnaryExp :: UnaryExp -> CodegenState -> Either String Int
 evalConstUnaryExp (UnaryExp1 p) const_tab = evalConstPrimaryExp p const_tab
 evalConstUnaryExp (UnaryExp2 op u) const_tab = liftM (evalConstOp op 0) (evalConstUnaryExp u const_tab)
 evalConstUnaryExp (UnaryExpCallFunc i _) const_tab = Left "using function call in a const context"
 
-evalConstPrimaryExp :: PrimaryExp -> ConstTable -> Either String Int
+evalConstPrimaryExp :: PrimaryExp -> CodegenState -> Either String Int
 evalConstPrimaryExp (PrimaryExp1 e) const_tab = evalConstExp e const_tab
 evalConstPrimaryExp (PrimaryExp2 n) const_tab = return n
 evalConstPrimaryExp (PrimaryExp3 (LVal id)) const_tab =
-  case Map.lookup id const_tab of Just v -> Right v
-                                  Nothing -> Left "using non-const variable in a const context"
+  case lookupConstVarRecur id const_tab of Just v -> Right v
+                                           Nothing -> Left "using non-const variable in a const context"
 
 -- Expressions
 
@@ -329,15 +440,15 @@ unaryExp :: UnaryExp -> Codegen String
 unaryExp (UnaryExp1 (PrimaryExp1 e)) = expr e
 unaryExp (UnaryExp1 (PrimaryExp2 n)) = opCodes Pos "0" (show n)
 unaryExp (UnaryExp1 (PrimaryExp3 (LVal id))) = do
+  st <- get
   sym_tab <- gets symTab
-  const_tab <- gets constTab
-  let lvar_sym = lookup id sym_tab
-      const_var = Map.lookup id const_tab
+  let lvar_sym = lookupVarRecur id st
+      const_var = lookupConstVarRecur id st
       new_sym = newSym sym_tab
   modify (\st -> st {symTab = appendSym "" new_sym sym_tab})
   case lvar_sym of Just j -> return $ "    "++new_sym++" = load i32, i32* "++j++"\n"
                    Nothing -> case const_var of Just cv -> return $ "    "++new_sym++" = add i32 0, "++show cv++"\n"
-                                                Nothing -> error $ "LVal "++id++" is neither variable or const variable"
+                                                Nothing -> error $ "LVal "++id++" is neither variable or const variable, st = "++show st
 
 unaryExp (UnaryExp2 op (UnaryExp1 p)) =
   case p of (PrimaryExp1 e) -> do
