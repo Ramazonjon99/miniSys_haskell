@@ -104,11 +104,6 @@ stmt = try
     char ';'
     return $ StmtContinue)
   <|> try
-  (do                              -- expr: e.g. 1 + 1;
-    e <- lexeme expr
-    char ';'
-    return $ Stmt2 e)
-  <|> try
   (do
     char ';'
     return $ StmtSemiColon)
@@ -133,7 +128,7 @@ stmt = try
       lexeme $ reserved "else"
       stmt)
     return $ StmtIfElse c s1 s2)
-  <|>
+  <|> try
   (do
     lexeme $ string "while"
     lexeme $ char '('
@@ -141,6 +136,11 @@ stmt = try
     lexeme $ char ')'
     s <- stmt
     return $ StmtWhile c s)
+  <|>
+  (do                              -- expr: e.g. 1 + 1;
+    e <- lexeme expr
+    char ';'
+    return $ Stmt2 e)
 
 --------------------------------- Exp ------------------------------------------
 
