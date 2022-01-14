@@ -204,10 +204,13 @@ globalDecl (VarDecl BInt ((VarDef2 id e):vds)) = do
 funcDef :: FuncDef -> Codegen String
 funcDef (FuncDef t id b) = do
   b' <- block b ""
+  has_cb <- gets hasContinueBreak
   let type_code = case t of FInt -> "i32"
       head_code = case id of "main" -> "define dso_local "++type_code++" @main(){\n"
                              _ -> error "the compiler only support main function now"
-  return $ head_code ++ b' ++ "}"
+  if has_cb
+     then error "break and continue can only occur in a loop"
+     else return $ head_code ++ b' ++ "}"
 
 block :: Block -> String -> Codegen String
 block (Block items) blk_sym= do
