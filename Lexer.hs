@@ -24,7 +24,7 @@ octalConst = do
 
 hexadecimalConst :: Parser Int
 hexadecimalConst = do
-  prefix <- string "0x" <|> string "0X"
+  prefix <- try (string "0x") <|> string "0X"
   digits <- many hexDigit
   return $ fst $ head $ readHex $ digits
 

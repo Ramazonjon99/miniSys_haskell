@@ -1,45 +1,46 @@
 module Syntax where
---CompUnit     -> Decl* FuncDef
---Decl         -> ConstDecl | VarDecl
---ConstDecl    -> 'const' BType ConstDef { ',' ConstDef } ';'
---BType        -> 'int'
---ConstDef     -> Ident '=' ConstInitVal
---ConstInitVal -> ConstExp
---ConstExp     -> AddExp
---VarDecl      -> BType VarDef { ',' VarDef } ';'
---VarDef       -> Ident
---                | Ident '=' InitVal
---InitVal      -> Exp
---FuncDef      -> FuncType Ident '(' ')' Block // 保证当前 Ident 只为 "main"
---FuncType     -> 'int'
---Block        -> '{' { BlockItem } '}'
---BlockItem    -> Decl | Stmt
---Stmt         -> LVal '=' Exp ';'
---                | Block
---                | [Exp] ';'
---                | 'if' '(' Cond ')' Stmt [ 'else' Stmt ]
---                | 'return' Exp ';' // [changed]
---Exp          -> AddExp
---Cond         -> LOrExp // [new]
---LVal         -> Ident
---PrimaryExp   -> '(' Exp ')' | LVal | Number
---UnaryExp     -> PrimaryExp
---                | Ident '(' [FuncRParams] ')'
---                | UnaryOp UnaryExp
---UnaryOp      -> '+' | '-' | '!'  // 保证 '!' 只出现在 Cond 中 [changed]
---FuncRParams  -> Exp { ',' Exp }
---MulExp       -> UnaryExp
---                | MulExp ('*' | '/' | '%') UnaryExp
---AddExp       -> MulExp
---                | AddExp ('+' | '-') MulExp
---RelExp       -> AddExp
---                | RelExp ('<' | '>' | '<=' | '>=') AddExp  // [new]
---EqExp        -> RelExp
---                | EqExp ('==' | '!=') RelExp  // [new]
---LAndExp      -> EqExp
---                | LAndExp '&&' EqExp  // [new]
---LOrExp       -> LAndExp
---                | LOrExp '||' LAndExp  // [new]
+-- CompUnit     -> Decl* FuncDef
+-- Decl         -> ConstDecl | VarDecl
+-- ConstDecl    -> 'const' BType ConstDef { ',' ConstDef } ';'
+-- BType        -> 'int'
+-- ConstDef     -> Ident '=' ConstInitVal
+-- ConstInitVal -> ConstExp
+-- ConstExp     -> AddExp
+-- VarDecl      -> BType VarDef { ',' VarDef } ';'
+-- VarDef       -> Ident
+--                 | Ident '=' InitVal
+-- InitVal      -> Exp
+-- FuncDef      -> FuncType Ident '(' ')' Block // 保证当前 Ident 只为 "main"
+-- FuncType     -> 'int'
+-- Block        -> '{' { BlockItem } '}'
+-- BlockItem    -> Decl | Stmt
+-- Stmt         -> LVal '=' Exp ';'
+--                 | Block
+--                 | [Exp] ';'
+--                 | 'if' '(' Cond ')' Stmt [ 'else' Stmt ]
+--                 | 'while' '(' Cond ')' Stmt
+--                 | 'return' Exp ';' // [changed]
+-- Exp          -> AddExp
+-- Cond         -> LOrExp
+-- LVal         -> Ident
+-- PrimaryExp   -> '(' Exp ')' | LVal | Number
+-- UnaryExp     -> PrimaryExp
+--                 | Ident '(' [FuncRParams] ')'
+--                 | UnaryOp UnaryExp
+-- UnaryOp      -> '+' | '-' | '!'  // 保证 '!' 只出现在 Cond 中
+-- FuncRParams  -> Exp { ',' Exp }
+-- MulExp       -> UnaryExp
+--                 | MulExp ('*' | '/' | '%') UnaryExp
+-- AddExp       -> MulExp
+--                 | AddExp ('+' | '-') MulExp
+-- RelExp       -> AddExp
+--                 | RelExp ('<' | '>' | '<=' | '>=') AddExp
+-- EqExp        -> RelExp
+--                 | EqExp ('==' | '!=') RelExp
+-- LAndExp      -> EqExp
+--                 | LAndExp '&&' EqExp
+-- LOrExp       -> LAndExp
+--                 | LOrExp '||' LAndExp
 
 data CompUnit = CompUnit [Decl] FuncDef
   deriving (Show)
@@ -75,6 +76,9 @@ data Stmt = Stmt1 LVal Exp
           | StmtReturn Exp
           | StmtIfElse Cond Stmt Stmt  -- the second stmt will be StmtSemiColon if the `else` branch is missing
           | StmtBlock Block
+          | StmtWhile Cond Stmt
+          | StmtBreak
+          | StmtContinue
   deriving (Show)
 
 type Exp = AddExp
