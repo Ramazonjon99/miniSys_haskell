@@ -8,7 +8,7 @@ import Syntax
 
 compUnit :: Parser CompUnit
 compUnit = do
-  whitespace
+  _ <- many whitespace
   f <- lexemeA funcDef
   return $ CompUnit f
 
