@@ -95,6 +95,16 @@ stmt = try
     return $ Stmt1 (LVal lval) e)
   <|> try
   (do
+    lexeme $ reserved "break"
+    char ';'
+    return $ StmtBreak)
+  <|> try
+  (do                              -- continue
+    lexeme $ reserved "continue"
+    char ';'
+    return $ StmtContinue)
+  <|> try
+  (do                              -- expr: e.g. 1 + 1;
     e <- lexeme expr
     char ';'
     return $ Stmt2 e)
@@ -104,7 +114,7 @@ stmt = try
     return $ StmtSemiColon)
   <|> try
   (do
-    lexeme $ string "return"
+    lexeme $ reserved "return"
     e <- lexeme expr
     char ';'
     return $ StmtReturn e)
@@ -112,7 +122,7 @@ stmt = try
   (do
     b <- block
     return $ StmtBlock b)
-  <|>
+  <|> try
   (do
     lexeme $ string "if"
     lexeme $ char '('
@@ -120,11 +130,17 @@ stmt = try
     lexeme $ char ')'
     s1 <- lexeme stmt
     s2 <- option StmtSemiColon (do
-      string "else"
-      lookAhead (noneOf ("_"++['a'..'z']++['A'..'Z']))
-      many whitespace
+      lexeme $ reserved "else"
       stmt)
     return $ StmtIfElse c s1 s2)
+  <|>
+  (do
+    lexeme $ string "while"
+    lexeme $ char '('
+    c <- lexeme cond
+    lexeme $ char ')'
+    s <- stmt
+    return $ StmtWhile c s)
 
 --------------------------------- Exp ------------------------------------------
 
@@ -253,6 +269,8 @@ lexeme :: Parser a -> Parser a
 lexeme p = p <* many whitespace
 lexeme1 :: Parser a -> Parser a
 lexeme1 p = p <* many1 whitespace
+reserved :: String -> Parser String
+reserved s = string s <* lookAhead (noneOf ("_"++['a'..'z']++['A'..'Z']))
 
 whitespace :: Parser ()
 whitespace = void space <|> blockComment <|> lineComment

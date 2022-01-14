@@ -3,9 +3,15 @@ module Emit where
 
 import Syntax
 import Data.Char (ord, chr)
+import Data.List (isPrefixOf)
 import Control.Monad
 import Control.Monad.State
 import qualified Data.Map as Map
+
+replace _ _ [] = []
+replace from to input = if isPrefixOf from input
+  then to ++ replace from to (drop (length from) input)
+  else head input : replace from to (tail input)
 
 emit :: CompUnit -> String
 emit cu =
@@ -13,7 +19,8 @@ emit cu =
                      (CodegenState { symTab = []
                                    , curBlkName = 0
                                    , blkTab = Map.empty
-                                   , calledFuncs = Map.empty})
+                                   , calledFuncs = Map.empty
+                                   , hasContinueBreak = False})
    in Map.foldr (++) "" (calledFuncs $ snd $ ret) ++ fst ret -- ++ (show . snd)  ret
 
 class OpCode a where
@@ -68,14 +75,14 @@ data CodegenState = CodegenState {
   , curBlkName :: BlockName  -- -1 for global
   , blkTab :: Map.Map BlockName BlockState
   , calledFuncs :: Map.Map String String
-  } deriving (Show)
+  , hasContinueBreak :: Bool} deriving (Show)
 
 data BlockState = BlockState {
     blkSym :: String  -- could be ""
   , blkVarTab :: VarTable  -- variables declared in this block
   , blkConstVarTab :: ConstVarTable  -- const variables declared in this block
-  , closureBlkNames :: [BlockName]
-  } deriving (Show)
+  , closureBlkNames :: [BlockName]}
+  deriving (Show)
 
 newtype Codegen a = Codegen { runCodegen :: State CodegenState a }
   deriving (Functor, Applicative, Monad, MonadState CodegenState)
@@ -97,8 +104,8 @@ newGlobalSym var_tab =
           | last s == 'z' = s++"a"
           | otherwise = init s ++ [chr ((ord $ last s) + 1)]
 
-appendSym :: VarName -> Symbol -> SymbolTable -> SymbolTable
-appendSym var sym sym_tab = (var, sym):sym_tab
+addSym :: VarName -> Symbol -> CodegenState -> CodegenState
+addSym var sym st = let sym_tab = symTab st in st {symTab = (var, sym):sym_tab}
 
 iterateClosures :: (BlockState -> Maybe b) -> BlockName -> CodegenState -> Maybe b
 iterateClosures f blk_name st =
@@ -262,7 +269,7 @@ decl (VarDecl BInt ((VarDef1 id):vds)) = do
                           Just _ -> error $ "variable "++id++" already exists"
   let sym_tab = symTab st
       new_sym = newSym sym_tab
-  modify (\st -> st {symTab = appendSym id new_sym sym_tab})
+  modify (addSym "" new_sym)
   modify (insertVar id new_sym)
   remaining_codes <- decl (VarDecl BInt vds)
   return $ "    "++new_sym++" = alloca i32\n"++remaining_codes
@@ -296,8 +303,20 @@ stmt StmtSemiColon = return ""
 stmt (StmtReturn e) = do
   exp_codes <- expr e
   sym_tab <- gets symTab
-  modify (\st -> st {symTab = ("", newSym sym_tab):sym_tab})
+  modify (addSym "" (newSym sym_tab))  -- return add a hidden basic block, thus sym should + 1
   return $ exp_codes++"    ret i32 "++lastSym sym_tab++"\n"
+
+stmt StmtBreak = do
+  sym_tab <- gets symTab
+  modify (addSym "" (newSym sym_tab))
+  modify (\st -> st {hasContinueBreak = True})
+  return $ "    br label %BREAK\n"
+
+stmt StmtContinue = do
+  sym_tab <- gets symTab
+  modify (addSym "" (newSym sym_tab))
+  modify (\st -> st {hasContinueBreak = True})
+  return $ "    br label %CONTINUE\n"
 
 stmt (StmtIfElse c stmt_if stmt_else) = do
   cond_codes <- cond c
@@ -308,13 +327,13 @@ stmt (StmtIfElse c stmt_if stmt_else) = do
 
       let if_label = newSym sym_tab
           cond_sym = lastSym sym_tab
-      modify (\st -> st {symTab = appendSym "" if_label sym_tab})
+      modify (addSym "" if_label)
 
       s1_codes <- stmt stmt_if
       sym_tab_if <- gets symTab
 
       let end_label = newSym sym_tab_if
-      modify (\st -> st {symTab = appendSym "" end_label sym_tab_if})
+      modify (addSym "" end_label)
 
       let br_if_code = "    br i1 "++cond_sym++", label "++if_label++", label "++end_label++"\n"
           br_end_code = "    br label "++end_label++"\n"
@@ -324,19 +343,19 @@ stmt (StmtIfElse c stmt_if stmt_else) = do
 
       let if_label = newSym sym_tab
           cond_sym = lastSym sym_tab
-      modify (\st -> st {symTab = appendSym "" if_label sym_tab})
+      modify (addSym "" if_label)
 
       if_codes <- stmt stmt_if
       sym_tab_if <- gets symTab
 
       let else_label = newSym sym_tab_if
-      modify (\st -> st {symTab = appendSym "" else_label sym_tab_if})
+      modify (addSym "" else_label)
 
       else_codes <- stmt stmt_else
       sym_tab_else <- gets symTab
 
       let end_label = newSym sym_tab_else
-      modify (\st -> st {symTab = appendSym "" end_label sym_tab_else})
+      modify (addSym "" end_label)
 
       let br_if_code = "    br i1 "++cond_sym++", label "++if_label++", label "++else_label++"\n"
           br_end_code = "    br label "++end_label++"\n"
@@ -347,6 +366,38 @@ stmt (StmtIfElse c stmt_if stmt_else) = do
   where labelCode label = "\n"++tail label++":\n"
 
 stmt (StmtBlock b) = block b ""
+
+stmt (StmtWhile c s) = do
+  has_cb_old <- gets hasContinueBreak
+
+  sym_tab <- gets symTab
+  let cond_label = newSym sym_tab
+  modify (addSym "" cond_label)
+
+  cond_codes <- cond c
+
+  sym_tab_cond <- gets symTab
+  let while_label = newSym sym_tab_cond
+      cond_sym = lastSym sym_tab_cond
+  modify (addSym "" while_label)
+
+  s_codes <- stmt s
+  sym_tab_while <- gets symTab
+  has_cb <- gets hasContinueBreak
+
+  let end_label = newSym sym_tab_while
+  modify (addSym "" end_label)
+  modify (\st -> st {hasContinueBreak = has_cb_old})
+
+  let br_while_code = "    br i1 "++cond_sym++", label "++while_label++", label "++end_label++"\n"
+      br_end_code = "    br label "++cond_label++"\n"
+      sub_s_codes = if has_cb then subCB cond_label end_label s_codes else s_codes
+  return $ "    br label "++cond_label++"\n"
+    ++labelCode cond_label++cond_codes++br_while_code
+    ++labelCode while_label++sub_s_codes++br_end_code
+    ++labelCode end_label
+  where labelCode label = "\n"++tail label++":\n"
+        subCB cond_label end_label codes = (replace "%BREAK" end_label . replace "%CONTINUE" cond_label) codes
 
 -- Evaluate const expressions
 evalConstExp e const_tab = evalConstAddExp e const_tab
@@ -378,8 +429,8 @@ unaryOpCodes LNot operand1 = do
   sym_tab <- gets symTab
   let new_sym = newSym sym_tab
       new_sym_zext = newSym' new_sym
-  modify (\st -> st {symTab = appendSym "" new_sym sym_tab})
-  modify (\st -> st {symTab = appendSym "" new_sym_zext sym_tab})
+  modify (addSym "" new_sym)
+  modify (addSym "" new_sym_zext)
   return $ "    "++new_sym++" = icmp eq i32 0, "++operand1++"\n"
     ++"    "++new_sym_zext++" = zext i1 "++new_sym++" to i32\n"
 unaryOpCodes op operand1 = opCodes op "0" operand1
@@ -389,7 +440,7 @@ opCodes op operand1 operand2 = do
   sym_tab <- gets symTab
   let new_sym = newSym sym_tab
       new_code = tripleCode (opInstr op) new_sym operand1 operand2
-  modify (\st -> st {symTab = appendSym "" new_sym sym_tab})
+  modify (addSym "" new_sym)
   return new_code
 
 expr :: Exp -> Codegen String
@@ -445,7 +496,7 @@ unaryExp (UnaryExp1 (PrimaryExp3 (LVal id))) = do
   let lvar_sym = lookupVarRecur id st
       const_var = lookupConstVarRecur id st
       new_sym = newSym sym_tab
-  modify (\st -> st {symTab = appendSym "" new_sym sym_tab})
+  modify (addSym "" new_sym)
   case lvar_sym of Just j -> return $ "    "++new_sym++" = load i32, i32* "++j++"\n"
                    Nothing -> case const_var of Just cv -> return $ "    "++new_sym++" = add i32 0, "++show cv++"\n"
                                                 Nothing -> error $ "LVal "++id++" is neither variable or const variable, st = "++show st
@@ -481,7 +532,7 @@ unaryExp (UnaryExpCallFunc id es) =
       then do
         sym_tab <- gets symTab
         let new_sym = newSym sym_tab
-        modify (\st -> st {symTab = appendSym "" new_sym sym_tab})
+        modify (addSym "" new_sym)
         return $ "    "++new_sym++" = call i32 @"++id++"()\n"
       else if (id == "putint" || id == "putch") && length es == 1
            then do
@@ -527,7 +578,7 @@ relExp (RelExp1 a) = do
   a_sym <- gets (lastSym . symTab)
   sym_tab <- gets symTab
   let new_sym = newSym sym_tab
-  modify (\st -> st {symTab = appendSym "" new_sym sym_tab})
+  modify (addSym "" new_sym)
   return $ a_codes
     ++"    "++new_sym++" = icmp ne i32 0, "++a_sym++"\n"
 relExp (RelExp2 a1 cmp (RelExp1 a2)) = do
