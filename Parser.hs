@@ -1,3 +1,5 @@
+-- Notice:
+-- 1. Sequence matters
 module Parser where
 
 import Text.ParserCombinators.Parsec
@@ -8,53 +10,152 @@ import Syntax
 
 compUnit :: Parser CompUnit
 compUnit = do
-  _ <- many whitespace
-  f <- lexemeA funcDef
-  return $ CompUnit f
+  many whitespace
+  decls <- many $ lexeme $ try decl
+  f <- lexeme funcDef
+  return $ CompUnit decls f
 
 funcDef :: Parser FuncDef
 funcDef = do
-  ft <- funcType
-  id <- ident
-  lexemeA $ char '('
-  lexemeA $ char ')'
+  ft <- lexeme1 funcType
+  id <- lexeme ident
+  lexeme $ char '('
+  lexeme $ char ')'
   b <- block
   return $ FuncDef ft id b
 
 funcType :: Parser FuncType
 funcType = do
-  _ <- lexemeA1 $ string "int"
-  return TypeInt
-
-ident :: Parser Ident
-ident = do
-  _ <- lexemeA $ string "main"
-  return Main
+  _ <- string "int"
+  return FInt
 
 block :: Parser Block
 block = do
-  lexemeA $ char '{'
-  string "return"
-  lookAhead (void $ char '(') <|> void (many1 whitespace)
-  ret <- lexemeA expr
-  lexemeA $ char ';'
-  lexemeA $ char '}'
-  return $ Block (Return ret)
+  lexeme $ char '{'
+  items <- many (lexeme blockItem)
+  char '}'
+  return $ Block items
+
+blockItem :: Parser BlockItem
+blockItem = try
+  (do
+    d <- decl
+    return $ BlockItem1 d)
+  <|>
+  (do
+    s <- stmt
+    return $ BlockItem2 s)
+
+decl :: Parser Decl
+decl = try
+  (do
+    lexeme1 $ string "const"
+    t <- lexeme1 btype
+    ds <- sepBy1 (lexeme constDef) (lexeme $ char ',')
+    char ';'
+    return $ ConstDecl t ds)
+  <|>
+  (do
+    t <- lexeme1 btype
+    ds <- sepBy1 (lexeme varDef) (lexeme $ char ',')
+    char ';'
+    return $ VarDecl t ds)
+
+btype :: Parser BType
+btype = do
+  string "int"
+  return BInt
+
+constDef :: Parser ConstDef
+constDef = do
+  id <- lexeme ident
+  lexeme $ char '='
+  a <- addExp
+  return $ ConstDef id a
+
+varDef :: Parser VarDef
+varDef = try
+  (do
+    id <- lexeme ident
+    lexeme $ char '='
+    e <- expr
+    return $ VarDef2 id e)
+  <|>
+  (do
+    id <- ident
+    return $ VarDef1 id)
+
+stmt :: Parser Stmt
+stmt = try
+  (do
+    lval <- lexeme ident
+    lexeme $ char '='
+    e <- lexeme expr
+    char ';'
+    return $ Stmt1 (LVal lval) e)
+  <|> try
+  (do
+    lexeme $ reserved "break"
+    char ';'
+    return $ StmtBreak)
+  <|> try
+  (do                              -- continue
+    lexeme $ reserved "continue"
+    char ';'
+    return $ StmtContinue)
+  <|> try
+  (do                              -- expr: e.g. 1 + 1;
+    e <- lexeme expr
+    char ';'
+    return $ Stmt2 e)
+  <|> try
+  (do
+    char ';'
+    return $ StmtSemiColon)
+  <|> try
+  (do
+    lexeme $ reserved "return"
+    e <- lexeme expr
+    char ';'
+    return $ StmtReturn e)
+  <|> try
+  (do
+    b <- block
+    return $ StmtBlock b)
+  <|> try
+  (do
+    lexeme $ string "if"
+    lexeme $ char '('
+    c <- lexeme cond
+    lexeme $ char ')'
+    s1 <- lexeme stmt
+    s2 <- option StmtSemiColon (do
+      lexeme $ reserved "else"
+      stmt)
+    return $ StmtIfElse c s1 s2)
+  <|>
+  (do
+    lexeme $ string "while"
+    lexeme $ char '('
+    c <- lexeme cond
+    lexeme $ char ')'
+    s <- stmt
+    return $ StmtWhile c s)
+
+--------------------------------- Exp ------------------------------------------
 
 expr :: Parser Exp
-expr = do
-  a <- addExp
-  return $ Exp a
+expr = addExp
 
 addExp :: Parser AddExp
 addExp = try
   (do
-    m <- lexemeA mulExp
-    c <- lexemeA (char '+' <|> char '-')
+    m <- lexeme mulExp
+    c <- lexeme (char '+' <|> char '-')
     a <- addExp
     if c == '+'
-    then return $ AddExp2 m Pos a
-    else return $ AddExp2 m Neg a)
+    then return $ AddExp2 m Add a
+    else return $ AddExp2 m Sub a)
   <|>
   (do
     m <- mulExp
@@ -63,8 +164,8 @@ addExp = try
 mulExp :: Parser MulExp
 mulExp = try
   (do
-    u <- lexemeA unaryExp
-    c <- lexemeA (char '*' <|> char '/' <|> char '%')
+    u <- lexeme unaryExp
+    c <- lexeme (char '*' <|> char '/' <|> char '%')
     m <- mulExp
     let op = case c of '*' -> Mul
                        '/' -> Div
@@ -78,10 +179,18 @@ mulExp = try
 unaryExp :: Parser UnaryExp
 unaryExp = try
   (do
-    c <- lexemeA (char '+' <|> char '-')
+    id <- lexeme ident
+    lexeme $ char '('
+    es <- sepBy (lexeme expr) (lexeme $ char ',')
+    char ')'
+    return $ UnaryExpCallFunc id es)
+  <|> try
+  (do
+    c <- lexeme (char '+' <|> char '-' <|> char '!')
     u <- unaryExp
     let op = case c of '+' -> Pos
                        '-' -> Neg
+                       '!' -> LNot
      in return $ UnaryExp2 op u)
   <|>
   (do
@@ -91,19 +200,77 @@ unaryExp = try
 primaryExp :: Parser PrimaryExp
 primaryExp = try
   (do
-    lexemeA $ char '('
-    e <- lexemeA expr
+    lexeme $ char '('
+    e <- lexeme expr
     char ')'
     return $ PrimaryExp1 e)
-  <|>
+  <|> try
   (do
     n <- number
     return $ PrimaryExp2 n)
+  <|>
+  (do
+    lval <- ident
+    return $ PrimaryExp3 (LVal lval))
 
-lexemeA :: Parser a -> Parser a
-lexemeA p = p <* many whitespace
-lexemeA1 :: Parser a -> Parser a
-lexemeA1 p = p <* many1 whitespace
+----------------------------- Cond ---------------------------------------------
+cond :: Parser Cond
+cond = lorExp
+
+lorExp :: Parser LOrExp
+lorExp = try
+  (do
+    a <- lexeme landExp
+    lexeme $ string "||"
+    o <- lorExp
+    return $ LOrExp2 a o)
+  <|>
+  (do
+    a <- landExp
+    return $ LOrExp1 a)
+
+landExp :: Parser LAndExp
+landExp = try
+  (do
+    e <- lexeme eqExp
+    lexeme $ string "&&"
+    a <- landExp
+    return $ LAndExp2 e a)
+  <|>
+  (do
+    e <- eqExp
+    return $ LAndExp1 e)
+
+eqExp :: Parser EqExp
+eqExp = try
+  (do
+    r <- lexeme relExp
+    eq <- lexeme $ string "==" <|> string "!="
+    e <- eqExp
+    return $ EqExp2 r eq e)
+  <|>
+  (do
+    r <- relExp
+    return $ EqExp1 r)
+
+relExp :: Parser RelExp
+relExp = try
+  (do
+    a <- lexeme addExp
+    rel <- lexeme $ try (string "<=") <|> try (string ">=") <|> string "<" <|> string ">"
+    r <- relExp
+    return $ RelExp2 a rel r)
+  <|>
+  (do
+    a <- addExp
+    return $ RelExp1 a)
+
+lexeme :: Parser a -> Parser a
+lexeme p = p <* many whitespace
+lexeme1 :: Parser a -> Parser a
+lexeme1 p = p <* many1 whitespace
+reserved :: String -> Parser String
+reserved s = string s <* lookAhead (noneOf ("_"++['a'..'z']++['A'..'Z']))
 
 whitespace :: Parser ()
 whitespace = void space <|> blockComment <|> lineComment
