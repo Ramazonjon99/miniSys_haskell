@@ -1,4 +1,4 @@
-[lab1]
+[jobs.lab1]
 
 image = { source = "dockerfile", path = ".", tag = "ramazon_lex" }
 
